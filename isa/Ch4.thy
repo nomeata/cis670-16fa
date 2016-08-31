@@ -4,8 +4,19 @@ imports
   "~~/src/HOL/Library/FSet"
 begin
 
-typedef atom = "{UNIV :: nat set}" by auto
+typedef atom = "UNIV :: nat set" by auto
 
+lemma have_fresh_atom:
+  obtains x :: atom where "x |\<notin>| L"
+proof-
+  from infinite_UNIV_nat finite_fset
+  have "\<exists> y . y \<notin> fset (Rep_atom |`| L)"
+    by (rule ex_new_if_finite)
+  then obtain y where "y \<notin> fset (Rep_atom |`| L)"..
+  hence "Abs_atom y |\<notin>| L"
+    by (metis Abs_atom_inverse UNIV_I fimage_eqI notin_fset)
+  thus ?thesis by (rule that)
+qed
 
 (*
 Inductive typ : Set :=
@@ -140,7 +151,7 @@ Fixpoint open_rec (k : nat) (u : exp)(e : exp)
     | _ => e 
   end.
 *)
-fun open_rec :: "nat \<Rightarrow> exp \<Rightarrow> exp \<Rightarrow> exp" where
+fun open_rec :: "nat \<Rightarrow> exp \<Rightarrow> exp \<Rightarrow> exp" ("{_ \<leadsto> _}_" [100,100,1000] 1000) where
   "open_rec k u (exp_bvar i) = (if k = i then u else exp_bvar i)"
 | "open_rec k u (exp_let e\<^sub>1 e\<^sub>2) = exp_let (open_rec k u e\<^sub>1) (open_rec (Suc k) u e\<^sub>2)"
 | "open_rec k u (exp_op opr e\<^sub>1 e\<^sub>2) = exp_op opr (open_rec k u e\<^sub>1) (open_rec k u e\<^sub>2)"
@@ -187,40 +198,72 @@ inductive lc :: "exp \<Rightarrow> bool" where
 inductive_cases [elim!]: "lc (exp_op opr e\<^sub>1 e\<^sub>2)"
 inductive_cases [elim!]: "lc (exp_bvar i)"
 
+
 (*
-Lemma subst_lc : forall (x : atom) u e,
-  lc e ->
-  lc u ->
-  lc ([x ~> u] e).
+Lemma open_rec_lc_core : forall e j v i u,
+  i <> j ->
+  {j ~> v} e = {i ~> u} ({j ~> v} e) ->
+  e = {i ~> u} e.
 *)
 
-(**
-The following is some YAK-Shaving, believed to be needed for subst_lc.
-Why is it not needed in the coq version?
-**)
-lemma open_rec_closed[simp]:
-  "lc e \<Longrightarrow> open_rec k u e = e"
+lemma open_rec_lc_core:
+  "i \<noteq> j \<Longrightarrow> {i \<leadsto> u} ({j \<leadsto> v} e) =  {j \<leadsto> v} e  \<Longrightarrow> {i \<leadsto> u} e = e"
+  apply (induction e arbitrary: i j)
+  apply (auto 4 4)
+  using nat.inject apply blast
+  done
+
+(* The lemma above, for open *)
+lemma open_lc_core:
+  "i \<noteq> 0 \<Longrightarrow> {i \<leadsto> u} (open e v) = open e v  \<Longrightarrow> {i \<leadsto> u} e = e"
+  unfolding open_def by (rule open_rec_lc_core)
+
+(*
+Lemma open_rec_lc : forall k u e,
+  lc e -> e = {k ~> u} e.
+*)
+
+lemma open_rec_lc[simp]: "lc e \<Longrightarrow> {k \<leadsto> u} e = e"
 proof (induction arbitrary: k rule: lc.induct)
 case (lc_let e\<^sub>1 L e\<^sub>2)
   have "open_rec k u e\<^sub>1 = e\<^sub>1" by fact
   moreover
-  have "open_rec (Suc k) u e\<^sub>2 = e\<^sub>2" sorry
+  thm lc_let.IH
+  obtain x where "x |\<notin>| L" by (rule have_fresh_atom)
+  then have "{Suc k \<leadsto> u}(open e\<^sub>2 (exp_fvar x)) = open e\<^sub>2 (exp_fvar x)"  by (rule lc_let.IH)
+  hence "{Suc k \<leadsto> u} e\<^sub>2 = e\<^sub>2" by (rule open_lc_core[rotated]) simp
   ultimately
   show ?case by simp
 qed auto
 
+(*
+Lemma subst_open_rec : forall e1 e2 u (x : atom) k,
+  lc u ->
+  [x ~> u] ({k ~> e2} e1) = {k ~> [x ~> u] e2} ([x ~> u] e1).
+*)
 lemma subst_open_rec[simp]:
   assumes "lc u"
-  shows "[x \<leadsto> u](open_rec k e\<^sub>1 e\<^sub>2) = open_rec k ([x \<leadsto> u] e\<^sub>1) ([x \<leadsto> u] e\<^sub>2)"
-using assms by (induction k e\<^sub>1 e\<^sub>2 rule:open_rec.induct) auto
+  shows "[x \<leadsto> u]{k \<leadsto> e\<^sub>1}e\<^sub>2 = {k \<leadsto> [x \<leadsto> u]e\<^sub>1}[x \<leadsto> u]e\<^sub>2"
+using assms
+by (induction k e\<^sub>1 e\<^sub>2 rule:open_rec.induct) auto
 
-
+(*
+Lemma subst_open : forall (x : atom) u e1 e2,
+  lc u ->
+  open ([x ~> u] e1) e2 = [x ~> u] (open e1 e2).
+*)
 lemma subst_open[simp]:
   assumes "lc u"
   shows "[x \<leadsto> u](open e\<^sub>1 e\<^sub>2) = open ([x \<leadsto> u] e\<^sub>1) ([x \<leadsto> u] e\<^sub>2)"
 using assms by (auto simp add: open_def)
 
 
+(*
+Lemma subst_lc : forall (x : atom) u e,
+  lc e ->
+  lc u ->
+  lc ([x ~> u] e).
+*)
 lemma  subst_lc:
   assumes "lc e" and [simp]: "lc u"
   shows "lc ([x \<leadsto> u] e)"
@@ -244,5 +287,19 @@ proof (induction rule: lc.induct)
   qed
   thus ?case by simp
 qed (auto intro!: lc.intros)
+
+(*
+Lemma subst_intro : forall (x : atom) u e,
+  x `notin` (fv e) ->
+  open e u = [x ~> u](open e (exp_fvar x)).
+*)
+
+lemma subst_open_rec_intro[simp]:
+  "x |\<notin>| fv e \<Longrightarrow> [x \<leadsto> u]{k \<leadsto> exp_fvar x}e = {k \<leadsto> u}e"
+by (induction k u e rule: open_rec.induct) auto
+
+lemma subst_intro:
+  "x |\<notin>| fv e \<Longrightarrow> [x \<leadsto> u](open e (exp_fvar x)) = open e u"
+unfolding open_def by (rule subst_open_rec_intro)
 
 end
