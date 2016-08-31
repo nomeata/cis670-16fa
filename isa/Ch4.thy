@@ -207,9 +207,9 @@ Lemma open_rec_lc_core : forall e j v i u,
 *)
 
 lemma open_rec_lc_core:
-  "i \<noteq> j \<Longrightarrow> {i \<leadsto> u} ({j \<leadsto> v} e) =  {j \<leadsto> v} e  \<Longrightarrow> {i \<leadsto> u} e = e"
+  "i \<noteq> j \<Longrightarrow> {i \<leadsto> u} ({j \<leadsto> v} e) = {j \<leadsto> v} e \<Longrightarrow> {i \<leadsto> u} e = e"
   apply (induction e arbitrary: i j)
-  apply (auto 4 4)
+  apply auto
   using nat.inject apply blast
   done
 
@@ -287,6 +287,7 @@ proof (induction rule: lc.induct)
   qed
   thus ?case by simp
 qed (auto intro!: lc.intros)
+
 
 (*
 Lemma subst_intro : forall (x : atom) u e,
