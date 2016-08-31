@@ -302,4 +302,15 @@ lemma subst_intro:
   "x |\<notin>| fv e \<Longrightarrow> [x \<leadsto> u](open e (exp_fvar x)) = open e u"
 unfolding open_def by (rule subst_open_rec_intro)
 
+(*
+Lemma fv_open : forall e1 e2,
+    fv (open e1 e2) [<=] fv e2 \u fv e1.
+*)
+
+lemma fv_open_rec: "fv (open_rec k e u) |\<subseteq>| fv e |\<union>| fv u"
+by (induction rule: open_rec.induct) auto
+
+lemma fv_open: "fv (open e1 e2) |\<subseteq>| fv e2 |\<union>| fv e1"
+unfolding open_def by (rule fv_open_rec)
+
 end
