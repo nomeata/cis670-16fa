@@ -2,7 +2,11 @@ theory Ch4
 imports
   Main
   "~~/src/HOL/Library/FSet"
+  "~~/src/HOL/Library/AList"
+  "~~/src/HOL/Eisbach/Eisbach"
 begin
+
+section \<open>Atoms (replaces Metalib)\<close>
 
 typedef atom = "UNIV :: nat set" by auto
 
@@ -17,6 +21,8 @@ proof-
     by (metis Abs_atom_inverse UNIV_I fimage_eqI notin_fset)
   thus ?thesis by (rule that)
 qed
+
+section \<open>Terms\<close>
 
 (*
 Inductive typ : Set :=
@@ -228,7 +234,6 @@ proof (induction arbitrary: k rule: lc.induct)
 case (lc_let e\<^sub>1 L e\<^sub>2)
   have "open_rec k u e\<^sub>1 = e\<^sub>1" by fact
   moreover
-  thm lc_let.IH
   obtain x where "x |\<notin>| L" by (rule have_fresh_atom)
   then have "{Suc k \<leadsto> u}(open e\<^sub>2 (exp_fvar x)) = open e\<^sub>2 (exp_fvar x)"  by (rule lc_let.IH)
   hence "{Suc k \<leadsto> u} e\<^sub>2 = e\<^sub>2" by (rule open_lc_core[rotated]) simp
@@ -257,6 +262,10 @@ lemma subst_open[simp]:
   shows "[x \<leadsto> u](open e\<^sub>1 e\<^sub>2) = open ([x \<leadsto> u] e\<^sub>1) ([x \<leadsto> u] e\<^sub>2)"
 using assms by (auto simp add: open_def)
 
+lemma open_subst:
+  assumes "lc u" and "x |\<notin>| fv e\<^sub>2"
+  shows "open ([x \<leadsto> u] e\<^sub>1) e\<^sub>2 = [x \<leadsto> u](open e\<^sub>1 e\<^sub>2)"
+by (simp add: assms)
 
 (*
 Lemma subst_lc : forall (x : atom) u e,
@@ -313,5 +322,94 @@ by (induction rule: open_rec.induct) auto
 
 lemma fv_open: "fv (open e1 e2) |\<subseteq>| fv e2 |\<union>| fv e1"
 unfolding open_def by (rule fv_open_rec)
+
+section \<open>Typing environments\<close>
+
+(*
+Notation env := (list (atom * typ)).
+*)
+type_synonym env  = "(atom \<times> type) list"
+
+abbreviation "binds x T E \<equiv> (x,T) \<in> set E"
+
+abbreviation singleton_env (infix "~" 60) where
+  "x ~ T \<equiv> [(x,T)]"
+
+(*
+Lemma binds_demo : forall (x:atom) (T:typ) (E F:env),
+  binds x T (E ++ (x ~ T) ++ F).
+*)
+lemma binds_demo: "binds x T (E @ (x ~ T) @ F)" 
+  by simp
+
+(*
+Lemma dom_demo : forall (x y : atom) (T : typ),
+  dom (x ~ T) [=] singleton x.
+*)
+abbreviation dom where "dom E \<equiv> fst ` set E"
+
+lemma dom_demo: "dom (x ~ T) =  {x}" by simp
+
+abbreviation uniq where "uniq E \<equiv> distinct (map fst E)"
+(*
+Lemma uniq_demo : forall (x y : atom) (T : typ),
+  x <> y -> uniq ((x ~ T) ++ (y ~ T)).
+*)
+lemma uniq: "x \<noteq> y \<Longrightarrow> uniq ((x ~ T) @ (y ~ T))" by simp
+
+(*
+Lemma subst_lc_inverse : forall x u e, lc ([x ~> u] e) -> lc u -> lc e.
+Proof.
+(* CHALLENGE EXERCISE *) Admitted.
+*)
+lemma subst_lc_inverse:
+  assumes "lc ([x \<leadsto> u] e)"
+  assumes "lc u"
+  shows "lc e"
+using assms(1)
+proof(induction "[x \<leadsto> u] e" arbitrary: x e rule: lc.induct)
+case (lc_let e\<^sub>1 L e\<^sub>2 x e)
+  show ?case
+  proof (cases "\<exists>x. e = exp_fvar x")
+    case True
+    thus "lc e" by (auto intro: lc.intros)
+  next
+    case False
+    with `exp_let e\<^sub>1 e\<^sub>2 = [x \<leadsto> u]e`
+    obtain e\<^sub>1' e\<^sub>2' where [simp]: "e = exp_let e\<^sub>1' e\<^sub>2'"  "e\<^sub>1 = [x \<leadsto> u]e\<^sub>1'"  "e\<^sub>2 = [x \<leadsto> u]e\<^sub>2'"
+      by (auto elim!: subst.elims[OF sym])
+
+    show ?thesis
+    unfolding `e = exp_let e\<^sub>1' e\<^sub>2'`
+    proof
+      show "lc e\<^sub>1'" by (auto intro: lc_let.hyps(2))
+    next
+      fix y
+      assume "y |\<notin>| L |\<union>| {|x|}"
+      thus "lc (open e\<^sub>2' (exp_fvar y))" using `lc u` by (auto intro:  lc_let.hyps(4))
+    qed
+  qed
+qed (auto elim!: subst.elims[OF sym] intro: lc.intros)
+
+
+(* Experiment: The same as above, trying to use tactics *)
+
+method lc_let_with_find_fresh = 
+  (match premises in "?H ([x \<leadsto> _]_)" for x \<Rightarrow> \<open>
+    match premises in "?H2 (L :: atom fset) \<Longrightarrow> _" for L \<Rightarrow> \<open>
+    rule lc_let[where L = "L |\<union>| {|x|}"]
+   \<close>
+\<close>)
+
+lemma subst_lc_inverse_variant:
+  assumes "lc ([x \<leadsto> u] e)"
+  assumes [simp]: "lc u"
+  notes open_subst[simp] subst_open[simp del]
+  shows "lc e"
+using assms(1)
+apply(induction "[x \<leadsto> u] e" arbitrary: x e rule: lc.induct)
+apply(auto elim!: subst.elims[OF sym] intro: lc.intros)
+apply(lc_let_with_find_fresh; auto)
+done
 
 end
