@@ -22,6 +22,10 @@ proof-
   thus ?thesis by (rule that)
 qed
 
+lemma exists_fresh_atom: "\<exists> x :: atom . x |\<notin>| L"
+  by (rule have_fresh_atom) (rule exI)
+
+
 section \<open>Terms\<close>
 
 (*
@@ -201,6 +205,7 @@ inductive lc :: "exp \<Rightarrow> bool" where
 | lc_let: "lc e\<^sub>1 \<Longrightarrow> (\<And> x. x |\<notin>| L \<Longrightarrow> lc (open e\<^sub>2 (exp_fvar x))) \<Longrightarrow> lc (exp_let e\<^sub>1 e\<^sub>2)"
 | lc_app: "lc e\<^sub>1 \<Longrightarrow> lc e\<^sub>2 \<Longrightarrow> lc (exp_op opr e\<^sub>1 e\<^sub>2)"
 
+lemmas lc.intros[intro]
 inductive_cases [elim!]: "lc (exp_op opr e\<^sub>1 e\<^sub>2)"
 inductive_cases [elim!]: "lc (exp_bvar i)"
 
@@ -279,8 +284,6 @@ lemma  subst_lc:
 using `lc e`
 proof (induction rule: lc.induct)
   case (lc_let e\<^sub>1 L e\<^sub>2)
-  thm lc_let.hyps
-  thm lc_let.IH
 
   have "lc (exp_let [x \<leadsto> u]e\<^sub>1 [x \<leadsto> u]e\<^sub>2)"
   proof(rule lc.lc_let)
@@ -290,12 +293,11 @@ proof (induction rule: lc.induct)
     assume "y |\<notin>| L |\<union>| {| x |}"
     hence "y |\<notin>| L" by simp
     hence "lc [x \<leadsto> u](open e\<^sub>2 (exp_fvar y))" by (rule lc_let.IH)
-    (* This is the step that is not clear to me why Coq does not need it. *)
     thus "lc (open [x \<leadsto> u]e\<^sub>2 (exp_fvar y))"
       using `y |\<notin>| L |\<union>| {| x |}` by auto
   qed
   thus ?case by simp
-qed (auto intro!: lc.intros)
+qed auto
 
 
 (*
@@ -322,6 +324,62 @@ by (induction rule: open_rec.induct) auto
 
 lemma fv_open: "fv (open e1 e2) |\<subseteq>| fv e2 |\<union>| fv e1"
 unfolding open_def by (rule fv_open_rec)
+
+
+(*
+Lemma subst_lc_inverse : forall x u e, lc ([x ~> u] e) -> lc u -> lc e.
+Proof.
+(* CHALLENGE EXERCISE *) Admitted.
+*)
+lemma subst_lc_inverse:
+  assumes "lc ([x \<leadsto> u] e)"
+  assumes "lc u"
+  shows "lc e"
+using assms(1)
+proof(induction "[x \<leadsto> u] e" arbitrary: x e rule: lc.induct)
+case (lc_let e\<^sub>1 L e\<^sub>2 x e)
+  show ?case
+  proof (cases "\<exists>x. e = exp_fvar x")
+    case True
+    thus "lc e" by auto
+  next
+    case False
+    with `exp_let e\<^sub>1 e\<^sub>2 = [x \<leadsto> u]e`
+    obtain e\<^sub>1' e\<^sub>2' where [simp]: "e = exp_let e\<^sub>1' e\<^sub>2'"  "e\<^sub>1 = [x \<leadsto> u]e\<^sub>1'"  "e\<^sub>2 = [x \<leadsto> u]e\<^sub>2'"
+      by (auto elim!: subst.elims[OF sym])
+
+    show ?thesis
+    unfolding `e = exp_let e\<^sub>1' e\<^sub>2'`
+    proof
+      show "lc e\<^sub>1'" by (auto intro: lc_let.hyps(2))
+    next
+      fix y
+      assume "y |\<notin>| L |\<union>| {|x|}"
+      thus "lc (open e\<^sub>2' (exp_fvar y))" using `lc u` by (auto intro:  lc_let.hyps(4))
+    qed
+  qed
+qed (auto elim!: subst.elims[OF sym])
+
+
+(* Experiment: The same as above, trying to use tactics *)
+
+method lc_let_with_find_fresh = 
+  (match premises in "?H ([x \<leadsto> _]_)" for x \<Rightarrow> \<open>
+    match premises in "?H2 (L :: atom fset) \<Longrightarrow> _" for L \<Rightarrow> \<open>
+    rule lc_let[where L = "L |\<union>| {|x|}"]
+   \<close>
+\<close>)
+
+lemma subst_lc_inverse_variant:
+  assumes "lc ([x \<leadsto> u] e)"
+  assumes [simp]: "lc u"
+  notes open_subst[simp] subst_open[simp del]
+  shows "lc e"
+using assms(1)
+apply(induction "[x \<leadsto> u] e" arbitrary: x e rule: lc.induct)
+apply(auto elim!: subst.elims[OF sym])
+apply(lc_let_with_find_fresh; auto)
+done
 
 section \<open>Typing environments\<close>
 
@@ -357,59 +415,100 @@ Lemma uniq_demo : forall (x y : atom) (T : typ),
 *)
 lemma uniq: "x \<noteq> y \<Longrightarrow> uniq ((x ~ T) @ (y ~ T))" by simp
 
+section \<open>Typing rules\<close>
+
 (*
-Lemma subst_lc_inverse : forall x u e, lc ([x ~> u] e) -> lc u -> lc e.
-Proof.
-(* CHALLENGE EXERCISE *) Admitted.
+Inductive typing : env -> exp -> typ -> Prop :=
+| typing_var : forall E (x : atom) T,
+    uniq E ->
+    binds x T E ->
+    typing E (exp_fvar x) T
+| typing_str  : forall s E,
+    uniq E ->
+    typing E (exp_str s) typ_string
+| typing_num  : forall i E,
+    uniq E ->
+    typing E (exp_num i) typ_num
+| typing_let : forall (L : atoms) E e1 e2 T1 T2,
+    typing E e1 T1 ->
+    (forall (x:atom), x `notin` L ->
+                 typing ((x ~ T1) ++ E) (open e2 (exp_fvar x)) T2) ->
+    typing E (exp_let e1 e2) T2
+| typing_op : forall E e1 e2,
+    typing E e1 typ_num ->
+    typing E e2 typ_num ->
+    typing E (exp_op plus e1 e2) typ_num.
 *)
-lemma subst_lc_inverse:
-  assumes "lc ([x \<leadsto> u] e)"
-  assumes "lc u"
+
+inductive typing where
+  typing_var: "uniq E \<Longrightarrow> binds x T E \<Longrightarrow> typing E (exp_fvar x) T"
+| typing_str: "uniq E \<Longrightarrow> typing E (exp_str s) typ_string"
+| typing_num: "uniq E \<Longrightarrow> typing E (exp_num i) typ_num"
+| typing_let :
+    "typing E e1 T1 \<Longrightarrow>
+    (\<And>x. x |\<notin>| L \<Longrightarrow>
+      typing ((x, T1)#E) (open e2 (exp_fvar x)) T2) \<Longrightarrow>
+    typing E (exp_let e1 e2) T2"
+| typing_op :
+    "typing E e1 typ_num \<Longrightarrow>
+     typing E e2 typ_num \<Longrightarrow> 
+     typing E (exp_op plus e1 e2) typ_num"
+
+inductive_cases typing_elims:
+  "typing E (exp_fvar x) T" 
+  "typing E (exp_str s) T"
+  "typing E (exp_num i) T"
+  "typing E (exp_let e1 e2) T"
+  "typing E (exp_op plus e1 e2) T"
+
+(*
+typing_lc : forall G e T, typing G e T -> lc e.
+*)
+lemma typing_lc : 
+  assumes "typing G e T"
   shows "lc e"
-using assms(1)
-proof(induction "[x \<leadsto> u] e" arbitrary: x e rule: lc.induct)
-case (lc_let e\<^sub>1 L e\<^sub>2 x e)
-  show ?case
-  proof (cases "\<exists>x. e = exp_fvar x")
-    case True
-    thus "lc e" by (auto intro: lc.intros)
-  next
-    case False
-    with `exp_let e\<^sub>1 e\<^sub>2 = [x \<leadsto> u]e`
-    obtain e\<^sub>1' e\<^sub>2' where [simp]: "e = exp_let e\<^sub>1' e\<^sub>2'"  "e\<^sub>1 = [x \<leadsto> u]e\<^sub>1'"  "e\<^sub>2 = [x \<leadsto> u]e\<^sub>2'"
-      by (auto elim!: subst.elims[OF sym])
+using assms by induction auto
 
-    show ?thesis
-    unfolding `e = exp_let e\<^sub>1' e\<^sub>2'`
-    proof
-      show "lc e\<^sub>1'" by (auto intro: lc_let.hyps(2))
-    next
-      fix y
-      assume "y |\<notin>| L |\<union>| {|x|}"
-      thus "lc (open e\<^sub>2' (exp_fvar y))" using `lc u` by (auto intro:  lc_let.hyps(4))
-    qed
-  qed
-qed (auto elim!: subst.elims[OF sym] intro: lc.intros)
+lemma uniq_bind[consumes 3]:
+  "uniq E \<Longrightarrow> binds x T1 E \<Longrightarrow> binds x T2 E \<Longrightarrow> T1 = T2"
+using map_of_is_SomeI by fastforce
 
+(*
+Lemma unicity : forall G e t1, typing G e t1 -> forall t2, typing G e t2 -> t1 = t2.
+*)
+(* Ugly apply script... *)
+lemma unicity: "typing G e t1 \<Longrightarrow> typing G e t2 \<Longrightarrow> t1 = t2"
+proof (induction G e t1 arbitrary: t2 rule: typing.induct)
+  case (typing_let E e1 T1 L e2 T2 T2')
 
-(* Experiment: The same as above, trying to use tactics *)
+  from typing_elims(4)[OF `typing E (exp_let e1 e2) T2'`]
+  obtain T1' L' where
+    "typing E e1 T1'"
+    and
+    asm: "\<And>x. x |\<notin>| L' \<Longrightarrow> typing ((x, T1') # E) (open e2 (exp_fvar x)) T2'"
+  by blast
 
-method lc_let_with_find_fresh = 
-  (match premises in "?H ([x \<leadsto> _]_)" for x \<Rightarrow> \<open>
-    match premises in "?H2 (L :: atom fset) \<Longrightarrow> _" for L \<Rightarrow> \<open>
-    rule lc_let[where L = "L |\<union>| {|x|}"]
-   \<close>
-\<close>)
+  obtain x where "x |\<notin>| L |\<union>| L'" by (rule have_fresh_atom)
+  hence "x |\<notin>| L" and "x |\<notin>| L'" by simp_all
 
-lemma subst_lc_inverse_variant:
-  assumes "lc ([x \<leadsto> u] e)"
-  assumes [simp]: "lc u"
-  notes open_subst[simp] subst_open[simp del]
-  shows "lc e"
-using assms(1)
-apply(induction "[x \<leadsto> u] e" arbitrary: x e rule: lc.induct)
-apply(auto elim!: subst.elims[OF sym] intro: lc.intros)
-apply(lc_let_with_find_fresh; auto)
+  from `typing E e1 T1'` have "T1 = T1'" by (rule typing_let.IH(1))
+  with asm `x |\<notin>| L'`
+  have "typing ((x, T1) # E) (open e2 (exp_fvar x)) T2'" by auto
+  with `x |\<notin>| L`
+  show "T2 = T2'" by (rule typing_let.IH(2))
+qed(auto elim!: typing_elims elim: uniq_bind)
+(* The same, as an ugly apply script: *)
+(*
+apply (induction G e t1 arbitrary: t2 rule: typing.induct)
+apply (auto elim!: typing_elims elim: uniq_bind)[1]
+apply (auto elim!: typing_elims)[2]
+apply (erule typing_elims)
+apply (subgoal_tac "\<exists>x. x |\<notin>| L |\<union>| La" )
+apply (erule exE)
+apply auto[1]
+apply (rule exists_fresh_atom)
+apply (auto elim!: typing_elims)[1]
 done
+*)
 
 end
