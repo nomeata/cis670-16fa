@@ -250,7 +250,7 @@ by (induction k e\<^sub>1 e\<^sub>2 rule:open_rec.induct) auto
 (*
 Lemma subst_open : forall (x : atom) u e1 e2,
   lc u ->
-  open ([x ~> u] e1) e2 = [x ~> u] (open e1 e2).
+  open ([x ~> u] e1) ([x ~> u] e2) = [x ~> u] (open e1 e2).
 *)
 lemma subst_open[simp]:
   assumes "lc u"
