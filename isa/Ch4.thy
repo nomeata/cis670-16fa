@@ -406,6 +406,13 @@ Lemma dom_demo : forall (x y : atom) (T : typ),
 *)
 abbreviation dom where "dom E \<equiv> fst ` set E"
 
+fun fdom :: "('a \<times> 'b) list \<Rightarrow> 'a fset" where
+  "fdom [] = {||}"
+ |"fdom ((x,T)#E) = finsert x (fdom E)"
+
+lemma fmember_fdom[simp]: "x |\<in>| fdom E \<longleftrightarrow> x \<in> dom E"
+  by (induction E rule: fdom.induct) auto
+
 lemma dom_demo: "dom (x ~ T) =  {x}" by simp
 
 abbreviation uniq where "uniq E \<equiv> distinct (map fst E)"
@@ -510,5 +517,34 @@ apply (rule exists_fresh_atom)
 apply (auto elim!: typing_elims)[1]
 done
 *)
+
+(*
+Lemma typing_weakening_strengthened :  forall (E F G : env) e T,
+  typing (G ++ E) e T ->
+  uniq (G ++ F ++ E) ->
+  typing (G ++ F ++ E) e T.
+*)
+lemma typing_weakening_strengthened:
+  assumes "typing (G @ E) e T" and "uniq (G @ F @ E)"
+  shows "typing (G @ F @ E) e T"
+using assms
+apply (induction "G @ E" e T arbitrary: G rule: typing.induct )
+apply (auto intro: typing.intros)
+apply (erule_tac L = "L |\<union>| fdom F |\<union>| fdom E |\<union>| fdom G" in typing_let)
+apply auto
+apply (fastforce  simp del: append_Cons simp add: append_Cons)
+done
+
+(*
+Lemma typing_weakening : forall (E F : env) e T,
+    typing E e T ->
+    uniq (F ++ E) ->
+    typing (F ++ E) e T.
+*)
+lemma typing_weakening:
+  assumes "typing E e T" and "uniq (F @ E)"
+  shows "typing (F @ E) e T"
+using typing_weakening_strengthened[where G = "[]"] assms by simp
+
 
 end
