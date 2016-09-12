@@ -483,7 +483,6 @@ using map_of_is_SomeI by fastforce
 (*
 Lemma unicity : forall G e t1, typing G e t1 -> forall t2, typing G e t2 -> t1 = t2.
 *)
-(* Ugly apply script... *)
 lemma unicity: "typing G e t1 \<Longrightarrow> typing G e t2 \<Longrightarrow> t1 = t2"
 proof (induction G e t1 arbitrary: t2 rule: typing.induct)
   case (typing_let E e1 T1 L e2 T2 T2')
