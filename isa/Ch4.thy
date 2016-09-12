@@ -98,6 +98,12 @@ fun subst :: "atom \<Rightarrow> exp \<Rightarrow> exp \<Rightarrow> exp"  ("[_ 
 | "subst z u (exp_let e\<^sub>1 e\<^sub>2) = exp_let (subst z u e\<^sub>1) (subst z u e\<^sub>2)"
 | "subst z u e = e"
 
+lemma subst_fvarE[elim]:
+  assumes "exp_fvar x = subst z u e"
+  obtains "e = exp_fvar x" and "z \<noteq> x"
+        | "e = exp_fvar z" and "u = exp_fvar x"
+using assms by (auto elim!: subst.elims[OF sym] split: if_splits)
+
 context fixes Y Z :: atom
 begin
 (*
@@ -325,6 +331,10 @@ by (induction rule: open_rec.induct) auto
 lemma fv_open: "fv (open e1 e2) |\<subseteq>| fv e2 |\<union>| fv e1"
 unfolding open_def by (rule fv_open_rec)
 
+lemma fv_open_elim[elim]:
+  assumes "x |\<in>| fv (open e1 e2)"
+  obtains "x |\<in>|  fv e2" | "x |\<in>| fv e1"
+using assms fv_open by blast
 
 (*
 Lemma subst_lc_inverse : forall x u e, lc ([x ~> u] e) -> lc u -> lc e.
@@ -545,5 +555,108 @@ lemma typing_weakening:
   shows "typing (F @ E) e T"
 using typing_weakening_strengthened[where G = "[]"] assms by simp
 
+(*
+Lemma typing_subst : forall (E F : env) e u S T (z : atom),
+  typing (F ++ (z ~ S) ++ E) e T ->
+  typing E u S ->
+  typing (F ++ E) ([z ~> u] e) T.
+Proof.
+*)
+
+lemma typing_subst:
+  assumes "typing (F @ (z ~ S) @ E) e T"
+  and "typing E u S"
+  shows "typing (F @ E) ([z \<leadsto> u] e) T"
+using assms[unfolded append_Cons append_Nil]
+proof(induction "(F @ (z, S) # E)" e T arbitrary: F  rule: typing.induct)
+case (typing_let e1 T1 L e2 T2 F)
+  from `typing _ u _` have [simp]: "lc u" by (rule typing_lc)
+  have "typing (F @ E) (exp_let [z \<leadsto> u]e1 [z \<leadsto> u]e2) T2"
+  by (rule typing.typing_let[where L = "L |\<union>| fv e2 |\<union>| {|z|}"])
+     (auto intro!: typing_let.hyps(2,4) typing_let.prems
+              simp add: open_subst append_Cons[symmetric]
+              simp del: subst_open append_Cons
+              )
+  thus ?case by simp
+qed (auto intro: typing_weakening typing.intros simp add: rev_image_eqI)
+
+(*
+Lemma typing_subst_simple : forall (E : env) e u S T (z : atom),
+  typing ((z ~ S) ++ E) e T ->
+  typing E u S ->
+  typing E ([z ~> u] e) T.
+Proof.
+*)
+lemma typing_subst_simple:
+  assumes "typing ((z ~ S) @ E) e T"
+  and "typing E u S"
+  shows "typing E ([z \<leadsto> u] e) T"
+using typing_subst[where F = "[]", simplified] assms[simplified].
+
+
+(*
+Lemma exchange : forall G1 G2 x1 x2 T1 T2 e T,
+    typing (G1 ++ (x1 ~ T1) ++ (x2 ~ T2) ++ G2) e T ->
+    typing (G1 ++ (x2 ~ T2) ++ (x1 ~ T1) ++ G2) e T.
+*)
+lemma exchange:
+  assumes "typing (G1 @ (x1 ~ T1) @ (x2 ~ T2) @ G2) e T"
+  shows   "typing (G1 @ (x2 ~ T2) @ (x1 ~ T1) @ G2) e T"
+using assms
+apply (induction "(G1 @ (x1 ~ T1) @ (x2 ~ T2) @ G2)" e T arbitrary: G1 rule: typing.induct)
+apply (auto intro: typing.intros)
+apply (rule_tac L = L in typing_let)
+apply fastforce+
+done
+
+(*
+Lemma strengthening : forall G e T,
+    typing G e T
+    -> forall G1 G2 x U, 
+      G = G1 ++ (x ~ U) ++ G2 -> x `notin` fv e -> typing (G1 ++ G2) e T.
+*)
+
+lemma strengthening:
+assumes "typing (G1 @ (x ~ U) @ G2) e T"
+assumes "x |\<notin>| fv e"
+shows   "typing (G1 @ G2) e T"
+using assms
+proof (induction "G1 @ (x ~ U) @ G2" e T arbitrary: G1 rule: typing.induct)
+case (typing_let e1 T1 L e2 T2 G1)
+
+  note IH =
+    typing_let.hyps(2)
+    (* This is annoying, as otherwise it would be so nice.
+       Also see http://stackoverflow.com/q/39459854/946226  *)
+    typing_let.hyps(4)[of _ "(x, T1) # G1" for x, simplified]
+  
+  from typing_let.prems
+  show ?case by (auto intro!: typing.typing_let IH)
+qed (auto intro: typing.intros)
+
+(*
+Lemma decomposition : forall e' e G x T',
+    typing G ([ x ~> e ] e') T'->
+    forall T, uniq ((x ~ T) ++ G) -> typing G e T -> typing ((x ~ T) ++ G) e' T'. 
+*)
+lemma decomposition_general:
+  assumes "typing (G1 @ G2) ([ x \<leadsto> e ] e') T'"
+  assumes "uniq (G1 @ (x ~ T) @ G)"
+  assumes "typing (G1 @ G2) e T"
+  shows "typing (G1 @ (x ~ T) @ G) e' T'"
+using assms
+(*
+apply(induction "G1 @ G2" "[ x \<leadsto>  e ] e'" T' arbitrary: G1 e' rule:typing.induct)
+apply (auto  intro: typing.intros elim!: subst_fvarE  typing_elims )[1]
+*)
+oops
+
+
+lemma decomposition:
+  assumes "typing G ([ x \<leadsto>  e ] e') T'"
+  assumes "uniq ((x ~ T) @ G)"
+  assumes "typing G e T"
+  shows "typing ((x ~ T) @ G) e' T'"
+oops  
 
 end
