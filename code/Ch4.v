@@ -422,7 +422,7 @@ Qed.
 
 (*************************************************************************)
 (*                                                                       *)
-(*  Stretch break (two days)                                             *)
+(*  Stretch break (one week)                                             *)
 (*                                                                       *)
 (*************************************************************************)
 
@@ -450,7 +450,7 @@ Inductive lc_e : exp -> Prop :=
       lc_e (exp_op op e1 e2).
 
 Hint Constructors lc_e.
-
+Check lc_e_ind.
 (* The primary use of the local closure proposition is to support induction on
     the syntax of abstract binding trees, such as discussed in Chapter 1.2 of
     PFPL.  The induction principle for type [exp] won't do: it requires
@@ -550,7 +550,7 @@ Inductive lc : exp -> Prop :=
   | lc_var : forall (x:atom), lc (exp_fvar x)
   | lc_num : forall n : nat, lc (exp_num n)
   | lc_str : forall s : string, lc (exp_str s)
-  | lc_let : forall L (e1 e2 : exp),
+  | lc_let : forall (L:atoms) (e1 e2 : exp),
       lc e1 
       -> (forall x, x `notin` L -> lc (open e2 (exp_fvar x)))
       -> lc (exp_let e1 e2)
@@ -585,6 +585,8 @@ Proof.
   - simpl. auto.
   - simpl. auto.
   - simpl.
+    Check lc_let.
+    apply lc_let with (L:= L). auto.
     (* DEMO *) Admitted.
 
 (* However, we get stuck here because we don't have any lemmas about the interaction between 
@@ -623,7 +625,7 @@ Admitted.
     substitution for index [S k] in term [e], while our induction
     hypothesis IHLC only tells use about index [k] in term [open e x].
     To solve the first problem, we generalize our IH over all [k].
-    That way, when [k] is incremented in the [abs] case, it will still
+    That way, when [k] is incremented in the [let] case, it will still
     apply.  Below, we use the tactic [generalize dependent] to
     generalize over [k] before using induction.
 *)
@@ -657,7 +659,7 @@ Admitted.
 >>
    Of course, to prove this result, we must generalize
    [0] and [S k] to be any pair of inequal numbers to get a strong
-   enough induction hypothesis for the [abs] case.
+   enough induction hypothesis for the [let] case.
  *)
 
 Lemma open_rec_lc_core : forall e j v i u,
@@ -829,7 +831,18 @@ Proof.
   - simpl. auto.
   - simpl. auto.
   - simpl.
-    (* FILL IN HERE (and delete "Admitted") *) Admitted.
+    Check subst_open.
+    apply lc_let with (L := L \u {{x}} ).
+    auto.
+    intros x0 Fr.
+    replace (exp_fvar x0) with ([x ~> u] exp_fvar x0).
+    rewrite subst_open.
+    apply H0. auto.
+    auto.
+    simpl. destruct (x0 == x). subst. fsetdec.
+    auto.
+  - simpl. auto.
+Qed.
 
 (*************************************************************************)
 (** * Induction principles for binding trees *)
@@ -846,24 +859,27 @@ Check lc_ind.
        x + y is a member of E [ {{ x }} \u {{ y }} ].
        
    For a given term, indexed by a given set of free variables, the induction 
-   principle reads:
+   principle modulo renaming reads:
 
    To show a property  P : forall X, E[X] -> Prop holds for an arbitrary 
    expression e in E[X] it suffices to show:
-        forall x, x `in` X -> P x
-        forall n, P n
-        forall s, P s
-        forall x x' e1 e2, such that x' notin X, 
-           P e1 -> P ( [ x' / x ] e2 ) -> P (let x be e1 in e2)
-        forall e1 e2, P e1 -> P e2 -> P (e1 `op` e2)
+        forall X x, x `in` X -> P X x
+        forall X n, P X n
+        forall X s, P X s
+        forall X x e1 e2, 
+           P X e1 -> (forall x, such that x' notin X, P [X u {x'}] ([ x' / x ] e2))
+                  -> P (let x be e1 in e2)
+        forall X e1 e2, P X e1 -> P X e2 -> P X (e1 `op` e2)
 
    In other words, in the variable case, we need to show the property for 
    all variables that actually appear in the term (though often in the proof, this 
-   set will be abstract). Also in the let case, we need to show the property hold 
-   for an arbitrary x' that does *not* appear in X. When we do the proof, 
+   set will be abstract).
+   In the let case, we need to show the property holds for the body of the 
+   let expression for all arbitrary x' that do *not* appear in X. 
 
-   we get to pick any X, as long as it is larger than the fv of e. In practice, this 
-   induction principle behaves like co-finite quantification. 
+   When we use this induction principle in a proof, 
+   we work with an arbitrary X. So in practice, this 
+   induction principle looks like co-finite quantification. 
   
 *) 
 
@@ -952,12 +968,12 @@ Qed.
     tactic [rewrite_env].
 *)
 
-Lemma rewrite_env_demo : forall (x y:atom) (T:typ) P,
+Lemma rewrite_env_demo : forall (x:atom) (T:typ) P,
   (forall E, P ((x,T):: E) -> True) ->
   P (x ~ T) ->
   True.
 Proof.
-  intros x y T P H.
+  intros x T P H.
   (* apply H. fails here. *)
   rewrite_env ((x,T) :: nil).
   apply H.
@@ -966,11 +982,22 @@ Qed.
 (** Environment operations. *)
 
 (** The ternary predicate [binds] holds when a given binding is
-    present somewhere in an environment.
+    present somewhere in an environment. The metatheory 
+    library adds operations for binds to the [auto] database.
 *)
 
 Lemma binds_demo : forall (x:atom) (T:typ) (E F:env),
   binds x T (E ++ (x ~ T) ++ F).
+Proof.
+  auto.
+Defined.
+Print binds_demo.
+
+(** Note that binds doesn't care if multiple bindings are present
+    or anything about the order of the bindings. *)
+
+Lemma binds_demo_2 : forall (x:atom) (T:typ) (U:typ) (E F:env),
+  binds x T (E ++ (x ~ U) ++ (x ~ T) ++ F).
 Proof.
   auto.
 Qed.
@@ -1050,7 +1077,8 @@ Proof.
   - destruct (x0 == x).
      auto.
      auto.
-  - pick fresh y and apply lc_let. auto.
+  - (* lc_let with (L := L \u fv e1 \u fv e2 \u fv u) *)
+    pick fresh y and apply lc_let. auto.
     (* Here, take note of the hypothesis [Fr]. *)
     rewrite <- (subst_neq_var x y u).
     rewrite subst_open. auto. auto. auto.
@@ -1068,7 +1096,6 @@ Qed.
 *)
 
 Lemma subst_lc_inverse : forall x u e, lc ([x ~> u] e) -> lc u -> lc e.
-Proof.
 (* CHALLENGE EXERCISE *) Admitted.
 
 
@@ -1089,7 +1116,7 @@ Proof.
 Inductive typing : env -> exp -> typ -> Prop :=
 | typing_var : forall E (x : atom) T,
     uniq E ->
-    binds x T E ->
+    binds x T E -> 
     typing E (exp_fvar x) T
 | typing_str  : forall s E,
     uniq E ->
@@ -1100,9 +1127,9 @@ Inductive typing : env -> exp -> typ -> Prop :=
 | typing_let : forall (L : atoms) E e1 e2 T1 T2,
     typing E e1 T1 ->
     (forall (x:atom), x `notin` L ->
-                 typing ((x ~ T1) ++ E) (open e2 (exp_fvar x)) T2) ->
+         typing ((x ~ T1) ++ E) (open e2 (exp_fvar x)) T2) ->
     typing E (exp_let e1 e2) T2
-| typing_op : forall E e1 e2,
+| typing_plus : forall E e1 e2,
     typing E e1 typ_num ->
     typing E e2 typ_num ->
     typing E (exp_op plus e1 e2) typ_num.
@@ -1133,8 +1160,8 @@ Qed.
    As PFPL Lemma 4.1 shows, there is only one type for each given term. We can
    state that property in Coq using the following lemma.  The key part of this
    proof is the lemma [binds_unique] from the metatheory library.  This lemma
-   states that there is only one type for a particular variable in the
-   context. 
+   states that there is only one type for a particular variable in a
+   uniq context. 
  *)
 
 Check binds_unique.
@@ -1245,7 +1272,7 @@ Admitted.
               atoms, since it will simplify the [dom] function behind
               the scenes.  [fsetdec] does not work with the [dom]
               function.
-       - The [typing_op] case follows directly from the induction
+       - The [typing_plus] case follows directly from the induction
          hypotheses.
   *)
 
@@ -1258,6 +1285,7 @@ Proof.
   remember (G ++ E) as E'.
   generalize dependent G.
   induction H; intros G Eq Uniq; subst.
+  Check binds_weaken.
  (* EXERCISE *) Admitted.
 
 
@@ -1296,6 +1324,7 @@ Qed.
     typing ((z ~ S) ++ E) e T ->
     typing E u S ->
     typing E ([z ~> u] e) T
+
   typing_subst : forall E F e u S T z,
     typing (F ++ (z ~ S) ++ E) e T ->
     typing E u S ->
@@ -1316,8 +1345,8 @@ Qed.
       - If [(x = z)], then we need to show [(typing (F ++ E) u T)].
         This follows from the given typing derivation for [u] by
         weakening and the fact that [T] must equal [S].
-      - If [(x <> z)], then we need to show [(typing (F ++ E) x T)].
-        This follows by the typing rule for variables.
+      - If [(x <> z)], then we need to show [(typing (F ++ E) x T)].        
+    This follows by the typing rule for variables.
     HINTS: Lemmas [binds_mid_eq], [uniq_remove_mid],
     and [binds_remove_mid] are useful.
   *)
@@ -1354,7 +1383,7 @@ Proof.
              opening operation.
           -- Recall the lemma [typing_to_lc] and the
              [rewrite_env] and [simpl_env] tactics.
-      - The [typing_op] case follows from the induction hypotheses.
+      - The [typing_plus] case follows from the induction hypotheses.
         Use [simpl] to simplify the substitution.
 *)
 
@@ -1396,8 +1425,8 @@ Proof.
    Hints:
      - Don't forget to use the [remember as] tactic.
      - The metalib tactic [solve_uniq] does what it claims.
-     - There are 4 subcases in the fvar case: x is in G1, x is x1 or x2 or x is in G2
-       access these four cases in succession using the lemma [binds_app_1].
+     - There are 4 subcases in the fvar case: x is in G1, x is x1 or x2 or x is in G2.
+       Access these four cases in succession using the lemma [binds_app_1].
      - [SearchAbout binds.] to see lemmas available for reasoning about 
        bindings in the context.
      - You'll need to rewrite_env to call the induction hypothesis in 
@@ -1443,6 +1472,7 @@ Proof.
    client and implementor by introducing a variable to mediate the
    interaction. 
 
+
    The proof of this lemma requires many of the lemmas shown above.
 
    Hint: prove this lemma by induction on the first typing judgement 
@@ -1462,7 +1492,7 @@ Proof.
 (*************************************************************************)
 
 (* Substitution and weakening together give us a property we call
-   renaming: (see [typing_rename below] that we can change the name
+   renaming: (see [typing_rename] below) that we can change the name
    of the variable used to open an expression in a typing
    derivation. In practice, this means that if a variable is not
    "fresh enough" during a proof, we can use this lemma to rename it
@@ -1489,7 +1519,7 @@ Qed.
    Demo: the proof of renaming.
    Note that this proof does not proceed by induction: even if we add
    new typing rules to the language, as long as the weakening and
-   substution properties hold we can use this proof.
+   substitution properties hold we can use this proof.
 *)
 Lemma typing_rename : forall (x y : atom) E e T1 T2,
   x `notin` fv e -> y `notin` (dom E `union` fv e) ->
