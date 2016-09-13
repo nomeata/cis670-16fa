@@ -104,6 +104,13 @@ lemma subst_fvarE[elim]:
         | "e = exp_fvar z" and "u = exp_fvar x"
 using assms by (auto elim!: subst.elims[OF sym] split: if_splits)
 
+lemma subst_letE[elim]:
+  assumes "exp_let e\<^sub>1 e\<^sub>2 = subst z u e"
+  obtains e\<^sub>1' e\<^sub>2' where "e = exp_let e\<^sub>1' e\<^sub>2'" and "e\<^sub>1 = subst z u e\<^sub>1'" and "e\<^sub>2 = subst z u e\<^sub>2'"
+        | "e = exp_fvar z" and "u = exp_let e\<^sub>1 e\<^sub>2"
+using assms by (auto elim!: subst.elims[OF sym] split: if_splits)
+
+
 context fixes Y Z :: atom
 begin
 (*
@@ -177,6 +184,9 @@ fun open_rec :: "nat \<Rightarrow> exp \<Rightarrow> exp \<Rightarrow> exp" ("{_
 Definition open e u := open_rec 0 u e.
 *)
 definition "open e u = open_rec 0 u e"
+
+lemma open_fvar[simp]: "open (exp_fvar x) u = exp_fvar x"
+  unfolding open_def by simp
 
 (*
 Lemma demo_open :
@@ -544,6 +554,12 @@ apply auto
 apply (fastforce  simp del: append_Cons simp add: append_Cons)
 done
 
+lemmas typing_weakening_one =
+  typing_weakening_strengthened[where F = "(x ~ T')" for x T', unfolded append.simps]
+lemmas typing_weakening_one_from =
+  typing_weakening_one[where G = "[]", unfolded append.simps]
+
+
 (*
 Lemma typing_weakening : forall (E F : env) e T,
     typing E e T ->
@@ -615,7 +631,6 @@ Lemma strengthening : forall G e T,
     -> forall G1 G2 x U, 
       G = G1 ++ (x ~ U) ++ G2 -> x `notin` fv e -> typing (G1 ++ G2) e T.
 *)
-
 lemma strengthening:
 assumes "typing (G1 @ (x ~ U) @ G2) e T"
 assumes "x |\<notin>| fv e"
@@ -623,7 +638,6 @@ shows   "typing (G1 @ G2) e T"
 using assms
 proof (induction "G1 @ (x ~ U) @ G2" e T arbitrary: G1 rule: typing.induct)
 case (typing_let e1 T1 L e2 T2 G1)
-
   note IH =
     typing_let.hyps(2)
     (* This is annoying, as otherwise it would be so nice.
@@ -639,17 +653,76 @@ Lemma decomposition : forall e' e G x T',
     typing G ([ x ~> e ] e') T'->
     forall T, uniq ((x ~ T) ++ G) -> typing G e T -> typing ((x ~ T) ++ G) e' T'. 
 *)
+
+lemma binds_add_inbetween:
+  assumes "x \<noteq> y"
+  assumes "binds y T' (G1 @ G2)"
+  shows   "binds y T' (G1 @ (x ~ T) @ G2)"
+using assms by auto
+
 lemma decomposition_general:
-  assumes "typing (G1 @ G2) ([ x \<leadsto> e ] e') T'"
-  assumes "uniq (G1 @ (x ~ T) @ G)"
-  assumes "typing (G1 @ G2) e T"
-  shows "typing (G1 @ (x ~ T) @ G) e' T'"
+  assumes "typing (G1 @ G2) ([ x \<leadsto> u ] e') T'"
+  assumes "uniq (G1 @ (x ~ T) @ G2)"
+  assumes "typing (G1 @ G2) u T"
+  shows "typing (G1 @ (x ~ T) @ G2) e' T'"
 using assms
-(*
-apply(induction "G1 @ G2" "[ x \<leadsto>  e ] e'" T' arbitrary: G1 e' rule:typing.induct)
-apply (auto  intro: typing.intros elim!: subst_fvarE  typing_elims )[1]
-*)
-oops
+proof(induction "G1 @ G2" "[ x \<leadsto> u ] e'" T' arbitrary: G1 e' rule:typing.induct)
+case (typing_var y T' G1 e')
+  from `exp_fvar y = [x \<leadsto> u]e'`
+  show "typing (G1 @ (x ~ T) @ G2) e' T'"
+  proof(cases rule: subst_fvarE)
+    assume "e' = exp_fvar y" and "x \<noteq> y"
+    from this(2) and `binds y T' (G1 @ G2)`
+    have "binds y T' (G1 @ (x ~ T) @ G2)" by (rule binds_add_inbetween)
+    with  `uniq (G1 @ (x ~ T) @ G2)`
+    show ?case unfolding `e' = _`  by (rule typing.intros)
+  next
+    assume "e' = exp_fvar x" and "u = exp_fvar y"
+
+    from `uniq (G1 @ G2)`  `binds y T' (G1 @ G2)`
+    have "typing (G1 @ G2) u T'"unfolding `u = _`  by (auto  intro: typing.intros)
+    with `typing (G1 @ G2) u T`
+    have "T = T'"  by (rule unicity)
+
+    from  `uniq (G1 @ (x ~ T) @ G2)`
+    show ?case
+      unfolding `e' = _` \<open>T = T'\<close>
+      by (rule typing.intros) simp
+   qed
+next
+  case (typing_let e1 T1 L e2 T2 G1 e')
+  from `exp_let e1 e2 = [x \<leadsto> u]e'`
+  show ?case
+  proof(cases rule: subst_letE)
+    fix e\<^sub>1' e\<^sub>2'
+    assume [simp]: "e' = exp_let e\<^sub>1' e\<^sub>2'" "e1 = [x \<leadsto> u]e\<^sub>1'" "e2 = [x \<leadsto> u]e\<^sub>2'"
+
+    note IH =
+      typing_let.hyps(4)[of _ "(x, T1) # G1" "open e\<^sub>2' (exp_fvar x)" for x, simplified]
+
+    from `typing (G1 @ G2) u T`
+    have [simp]: "lc u" by (rule typing_lc)
+    
+    from typing_let.hyps(2) typing_let.prems(1,2)
+    show ?case
+      apply (auto intro!: typing.typing_let[where L = "L |\<union>| {|x|} |\<union>| fv u |\<union>| fv e\<^sub>2' |\<union>| fdom G1 |\<union>| fdom G2" ])
+      apply (auto intro!: IH intro: typing_weakening_one_from)
+      done
+  next
+    assume "e' = exp_fvar x" and "u = exp_let e1 e2"
+
+    from typing_let.hyps(1,3)
+    have "typing (G1 @ G2) u T2"
+      unfolding `u = _` by (auto intro!:  typing.typing_let)
+    with `typing (G1 @ G2) u T`
+    have "T = T2" by (rule unicity)
+
+    from  `uniq (G1 @ (x ~ T) @ G2)`
+    show ?case
+      unfolding `e' = _` \<open>T = T2\<close>
+      by (rule typing.intros) simp
+  qed
+qed (auto intro: typing.intros elim!: typing_elims elim!: subst.elims[OF sym] split: if_splits)
 
 
 lemma decomposition:
@@ -657,6 +730,6 @@ lemma decomposition:
   assumes "uniq ((x ~ T) @ G)"
   assumes "typing G e T"
   shows "typing ((x ~ T) @ G) e' T'"
-oops  
+using decomposition_general[of "[]", unfolded append_Nil] assms.
 
 end
