@@ -777,7 +777,57 @@ next
   finally show ?thesis.
 qed
     
+(*
+Lemma typing_let_exists : forall x (E : env) (e1 e2 : exp) (T1 T2 : typ),
+       typing E e1 T1 
+       -> x `notin` fv e2
+       -> typing ((x ~ T1) ++ E) (open e2 (exp_fvar x)) T2 
+       -> typing E (exp_let e1 e2) T2.
+*)
+lemma typing_let_exists:
+  assumes "typing E e1 T1"
+  assumes "x |\<notin>| fv e2"
+  assumes "typing ((x ~ T1) @ E) (open e2 (exp_fvar x)) T2"
+  shows "typing E (exp_let e1 e2) T2"
+proof(rule typing.typing_let)
+  show "typing E e1 T1" by fact
+next
+  fix y
+  assume "y |\<notin>| fdom E |\<union>| fv e2"
+  from assms(2) this assms(3)
+  have "typing ((y ~ T1) @ E) (open e2 (exp_fvar y)) T2" by (rule typing_rename)
+  thus "typing ((y, T1) # E) (open e2 (exp_fvar y)) T2" by simp
+qed
 
-  
+(*
+Lemma typing_let_inversion : forall (E : env) (e1 e2 : exp) (T2 : typ),
+    typing E (exp_let e1 e2) T2
+    -> (exists T1, typing E e1 T1 /\
+      (forall x,  x `notin` (fv e2 \u dom E)
+       -> typing ((x ~ T1) ++ E) (open e2 (exp_fvar x)) T2)).
+*)
+lemma typing_let_inversion:
+  assumes "typing E (exp_let e1 e2) T2"
+  obtains T1 where
+    "typing E e1 T1" and "\<And>x. x |\<notin>| fdom E |\<union>| fv e2  \<Longrightarrow> typing ((x ~ T1) @ E) (open e2 (exp_fvar x)) T2"
+proof-
+  from assms
+  obtain T1 L where "typing E e1 T1" and hyp: "\<And>x. x |\<notin>| L \<Longrightarrow>  typing ((x, T1)#E) (open e2 (exp_fvar x)) T2"
+    by (rule typing_elims) rule
+  show ?thesis
+  proof(rule that)
+    show "typing E e1 T1" by fact
+  next
+    fix x
+    assume "x |\<notin>| fdom E |\<union>| fv e2"
+    obtain y where "y |\<notin>| L |\<union>| fv e2" by (rule have_fresh_atom)
+    hence "y |\<notin>| L" and "y |\<notin>|  fv e2" by simp_all
+    from this(1) 
+    have "typing ((y, T1)#E) (open e2 (exp_fvar y)) T2" by (rule hyp)
+    hence "typing ((y ~ T1)@E) (open e2 (exp_fvar y)) T2" by simp
+    with \<open>y |\<notin>| fv e2\<close> \<open>x |\<notin>| fdom E |\<union>| fv e2\<close>
+    show "typing ((x ~ T1)@E) (open e2 (exp_fvar x)) T2" by (rule typing_rename)
+  qed
+qed
 
 end
