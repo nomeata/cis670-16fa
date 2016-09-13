@@ -732,4 +732,52 @@ lemma decomposition:
   shows "typing ((x ~ T) @ G) e' T'"
 using decomposition_general[of "[]", unfolded append_Nil] assms.
 
+(*
+Lemma typing_uniq : forall E e T,
+  typing E e T -> uniq E.
+*)
+lemma typing_uniq:
+  assumes "typing E e T"
+  shows "uniq E"
+using assms by (rule typing.induct)
+
+(*
+Lemma typing_rename : forall (x y : atom) E e T1 T2,
+  x `notin` fv e -> y `notin` (dom E `union` fv e) ->
+  typing ((x ~ T1) ++ E) (open e (exp_fvar x)) T2 ->
+  typing ((y ~ T1) ++ E) (open e (exp_fvar y)) T2.
+*)
+lemma typing_rename:
+  assumes "x |\<notin>| fv e"
+  assumes "y |\<notin>| fdom E |\<union>| fv e"
+  assumes "typing ((x ~ T1) @ E) (open e (exp_fvar x)) T2"
+  shows   "typing ((y ~ T1) @ E) (open e (exp_fvar y)) T2"
+proof(cases "x = y")
+case True
+  from assms(3)
+  show ?thesis unfolding \<open>x=y\<close>.
+next
+  assume [simp]: "x\<noteq>y"
+  
+  from assms(3) have "uniq ((x ~ T1) @ E)" by (rule typing_uniq)
+  with assms(2)
+  have "uniq ((x ~ T1) @ (y ~ T1) @ E)" by auto
+
+  with \<open>typing ((x ~ T1) @ E) (open e (exp_fvar x)) T2\<close>
+  have "typing ((x ~ T1) @ (y ~ T1) @ E) (open e (exp_fvar x)) T2"
+    by (rule typing_weakening_strengthened)
+  moreover
+  have "uniq ((y ~ T1) @ E)" using `uniq ((x ~ T1) @ (y ~ T1) @ E)` by auto
+  hence "typing ((y ~ T1) @ E) (exp_fvar y) T1" by rule auto
+  ultimately
+  have "typing ((y ~ T1) @ E) [x \<leadsto> exp_fvar y](open e (exp_fvar x)) T2"
+    by (rule typing_subst_simple)
+  also have "[x \<leadsto> exp_fvar y](open e (exp_fvar x)) = open e (exp_fvar y)"
+    using assms(1) by (rule subst_intro)
+  finally show ?thesis.
+qed
+    
+
+  
+
 end
