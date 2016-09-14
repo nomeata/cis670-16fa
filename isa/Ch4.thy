@@ -225,7 +225,6 @@ lemmas lc.intros[intro]
 inductive_cases [elim!]: "lc (exp_op opr e\<^sub>1 e\<^sub>2)"
 inductive_cases [elim!]: "lc (exp_bvar i)"
 
-
 (*
 Lemma open_rec_lc_core : forall e j v i u,
   i <> j ->
@@ -827,6 +826,33 @@ proof-
     hence "typing ((y ~ T1)@E) (open e2 (exp_fvar y)) T2" by simp
     with \<open>y |\<notin>| fv e2\<close> \<open>x |\<notin>| fdom E |\<union>| fv e2\<close>
     show "typing ((x ~ T1)@E) (open e2 (exp_fvar x)) T2" by (rule typing_rename)
+  qed
+qed
+
+lemma lc_let_inversion:
+  assumes "lc (exp_let e1 e2)"
+  obtains "lc e1" and "\<And>x. lc (open e2 (exp_fvar x))"
+proof-
+  from assms
+  obtain L where "lc e1" and hyp: "\<And>x. x |\<notin>| L \<Longrightarrow> lc (open e2 (exp_fvar x))"
+    by (rule lc.cases) auto
+  
+  show ?thesis
+  proof(rule that)
+    show "lc e1" by fact
+  next
+    fix x
+    obtain y where "y |\<notin>| L |\<union>| fv e2" by (rule have_fresh_atom)
+    hence "y |\<notin>| L" and "y |\<notin>| fv e2" by auto
+    from this(1)
+    have "lc (open e2 (exp_fvar y))" by (rule hyp)
+    moreover
+    have "lc (exp_fvar x)"..
+    ultimately
+    have "lc ([y \<leadsto> exp_fvar x](open e2 (exp_fvar y)))" by (rule subst_lc)
+    with `y |\<notin>| fv e2`
+    show "lc (open e2 (exp_fvar x))"
+       by (simp add: subst_intro)
   qed
 qed
 
