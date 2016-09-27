@@ -53,6 +53,13 @@ inductive eval :: "exp \<Rightarrow> exp \<Rightarrow> bool" where
     eval (exp_let e1 e2) (open e2 e1)"
 lemmas eval.intros[intro]
 
+inductive_cases eval_cases:
+  "eval (exp_str v) e3"
+  "eval (exp_num v) e3"
+  "eval (exp_fvar v) e3"
+  "eval (exp_op opr e1 e2) e3"
+  "eval (exp_let e1 e2) e3"
+
 (*
 Module Evaluation.
   Definition S := exp.
@@ -128,5 +135,60 @@ next
     by cases (auto elim: eval.cases)
 qed
 
+(*
+Lemma finality_of_values : forall e, lc e -> not (value e /\ exists e', eval e e').
+*)
+
+lemma finality_of_values : "lc e \<Longrightarrow> \<not>(value e \<and> (\<exists> e'. eval e e'))"
+  by(induction rule:lc.induct)(auto elim: eval.cases value.cases)
+
+(*
+Lemma multistep_let_rhs : forall e1 e1' e2,
+    multistep e1 e1' -> state (exp_let e1 e2) -> multistep (exp_let e1 e2) (exp_let e1' e2).
+*)
+lemma multistep_let_rhs:
+  assumes "multistep e1 e1'"
+  assumes "lc (exp_let e1 e2)"
+  shows "multistep (exp_let e1 e2) (exp_let e1' e2)"
+  using assms
+  apply (induction)
+  apply (rule ms_refl, assumption)
+  apply (metis eval_let_rhs ms_step step_states)
+  done
+
+(*
+Lemma determinacy : forall e e1, eval e e1 -> forall e2, eval e e2 -> e1 = e2.
+*)
+lemma determinacy:
+  assumes "eval e e1"
+  assumes "eval e e2"
+  shows "e1 = e2"
+using assms
+proof (induction arbitrary: e2)
+  case eval_op_plus
+  thus ?case by (auto elim: eval_cases)
+next
+  case (eval_op_fst e1 e1' e2 opr op_e)
+  from `eval e1 e1'`
+  have "\<not> value e1" using final_state' finality_of_values by blast
+  with `eval (exp_op opr e1 e2) op_e` eval_op_fst.IH
+  show "exp_op opr e1' e2 = op_e"  by (auto elim: eval_cases)
+next
+  case (eval_op_snd e1 e2 e2' opr op_e)
+  from `eval e2 e2'`
+  have "\<not> value e2" using final_state' finality_of_values by blast
+  with `value e1` `eval (exp_op opr e1 e2) op_e` eval_op_snd.IH
+  show "exp_op opr e1 e2' = op_e" by (auto dest: final_does_not_step elim!:  eval_cases)
+next
+  case (eval_let_rhs e1 e1' e2 let_e)
+  from `eval e1 e1'`
+  have "\<not> value e1" using final_state' finality_of_values by blast
+  with `eval (exp_let e1 e2) let_e` eval_let_rhs.IH
+  show "exp_let e1' e2 = let_e"  by (auto elim: eval_cases)
+next
+  case (eval_let_red e1 e2  op_e)
+  thus ?case
+    by (auto dest: final_does_not_step elim!: eval_cases)
+qed
 
 end
